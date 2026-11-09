@@ -1,16 +1,28 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 import os
 from supabase import create_client, Client
+import threading
 
 app = FastAPI(title="RAG Service for VK Bot")
 
-# Загружаем модель
-print("Загрузка модели rubert-tiny2...")
-model = SentenceTransformer('cointegrated/rubert-tiny2')
+# Глобальная переменная для модели
+model = None
 
-# Подключение к Supabase (берем из переменных окружения)
+# Функция для фоновой загрузки модели
+def load_model():
+    global model
+    print("Загрузка модели rubert-tiny2... Это может занять пару минут.")
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer('cointegrated/rubert-tiny2')
+    print("Модель успешно загружена!")
+
+# Запускаем загрузку в фоне при старте приложения
+@app.on_event("startup")
+def startup_event():
+    threading.Thread(target=load_model).start()
+
+# Подключение к Supabase
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
@@ -29,33 +41,29 @@ def read_root():
 
 @app.post("/search")
 def search(request: SearchRequest):
+    if model is None:
+        raise HTTPException(status_code=503, detail="Модель еще загружается, подождите...")
     try:
-        # 1. Делаем эмбеддинг вопроса
         query_embedding = model.encode(request.question).tolist()
-        
-        # 2. Ищем в Supabase
         response = supabase.rpc(
             'match_documents',
             {
                 'query_embedding': query_embedding,
-                'match_threshold': 0.3, # Понизил порог, чтобы находило больше
+                'match_threshold': 0.3,
                 'match_count': request.top_k
             }
         ).execute()
-        
-        # 3. Формируем ответ
         chunks = [item['content'] for item in response.data]
         return {"context": "\n\n".join(chunks)}
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/upload")
 def upload(request: UploadRequest):
+    if model is None:
+        raise HTTPException(status_code=503, detail="Модель еще загружается, подождите...")
     try:
-        # Разбиваем на куски по 500 символов
         chunks = [request.content[i:i+500] for i in range(0, len(request.content), 500)]
-        
         data_to_insert = []
         for chunk in chunks:
             if not chunk.strip(): continue
@@ -65,8 +73,6 @@ def upload(request: UploadRequest):
                 "content": chunk,
                 "embedding": embedding
             })
-            
-        # Вставляем пачкой в Supabase
         supabase.table("document_chunks").insert(data_to_insert).execute()
         return {"status": "success", "chunks_added": len(data_to_insert)}
     except Exception as e:
