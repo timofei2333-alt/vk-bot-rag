@@ -7,8 +7,8 @@ from fastembed import TextEmbedding
 app = FastAPI(title="RAG Service for VK Bot")
 
 # Инициализируем легкую модель
-print("Загрузка модели rubert-tiny2...")
-model = TextEmbedding(model_name="cointegrated/rubert-tiny2")
+print("Загрузка модели ultilingual-e5-small")
+model = TextEmbedding(model_name="intfloat/multilingual-e5-small")
 
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
