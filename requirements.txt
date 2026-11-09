@@ -1,5 +1,7 @@
 fastapi
 uvicorn
-sentence-transformers
 supabase
 pydantic
+sentence-transformers
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch --index-url https://download.pytorch.org/whl/cpu
