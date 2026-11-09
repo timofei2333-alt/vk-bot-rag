@@ -2,13 +2,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 from supabase import create_client, Client
-from fastembed import TextEmbedding
+from sentence_transformers import SentenceTransformer
 
 app = FastAPI(title="RAG Service for VK Bot")
 
-# Инициализируем легкую модель
-print("Загрузка модели ultilingual-e5-small")
-model = TextEmbedding(model_name="multilingual-e5-small")
+# Загружаем модель
+print("Загрузка модели rubert-tiny2...")
+model = SentenceTransformer('cointegrated/rubert-tiny2')
 
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
@@ -29,9 +29,7 @@ def read_root():
 @app.post("/search")
 def search(request: SearchRequest):
     try:
-        # Делаем эмбеддинг вопроса (fastembed возвращает генератор, берем первый элемент)
-        query_embedding = list(model.embed([request.question]))[0].tolist()
-        
+        query_embedding = model.encode(request.question).tolist()
         response = supabase.rpc(
             'match_documents',
             {
@@ -40,10 +38,8 @@ def search(request: SearchRequest):
                 'match_count': request.top_k
             }
         ).execute()
-        
         chunks = [item['content'] for item in response.data]
         return {"context": "\n\n".join(chunks)}
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -53,18 +49,13 @@ def upload(request: UploadRequest):
         chunks = [request.content[i:i+500] for i in range(0, len(request.content), 500)]
         chunks = [c for c in chunks if c.strip()]
         
-        if not chunks:
-            return {"status": "success", "chunks_added": 0}
-
-        # Делаем эмбеддинги для всех кусков разом (быстро и без лишней памяти)
-        embeddings = list(model.embed(chunks))
-        
         data_to_insert = []
-        for i, chunk in enumerate(chunks):
+        for chunk in chunks:
+            embedding = model.encode(chunk).tolist()
             data_to_insert.append({
                 "document_name": request.document_name,
                 "content": chunk,
-                "embedding": embeddings[i].tolist()
+                "embedding": embedding
             })
             
         supabase.table("document_chunks").insert(data_to_insert).execute()
