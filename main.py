@@ -3,12 +3,14 @@ from pydantic import BaseModel
 import os
 from supabase import create_client, Client
 from fastembed import TextEmbedding
+from huggingface_hub import snapshot_download
 
 app = FastAPI(title="RAG Service for VK Bot")
 
-# Загружаем легкую модель, которая поддерживается fastembed
-print("Загрузка модели...")
-model = TextEmbedding(model_name="intfloat/multilingual-e5-small")
+# Скачиваем модель вручную и загружаем её локально
+print("Скачивание и загрузка модели...")
+model_dir = snapshot_download(repo_id="cointegrated/rubert-tiny2")
+model = TextEmbedding(model_name=model_dir)  # Передаем локальный путь
 
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
@@ -29,7 +31,6 @@ def read_root():
 @app.post("/search")
 def search(request: SearchRequest):
     try:
-        # FastEmbed возвращает генератор, берем первый элемент и делаем список
         query_embedding = list(model.embed([request.question]))[0].tolist()
         
         response = supabase.rpc(
@@ -54,7 +55,6 @@ def upload(request: UploadRequest):
         if not chunks:
             return {"status": "success", "chunks_added": 0}
 
-        # Делаем вектора разом
         embeddings = list(model.embed(chunks))
         
         data_to_insert = []
