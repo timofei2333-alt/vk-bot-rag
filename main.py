@@ -2,13 +2,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 from supabase import create_client, Client
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 app = FastAPI(title="RAG Service for VK Bot")
 
-# Загружаем модель
-print("Загрузка модели rubert-tiny2...")
-model = SentenceTransformer('cointegrated/rubert-tiny2')
+# Загружаем легкую модель, которая поддерживается fastembed
+print("Загрузка модели...")
+model = TextEmbedding(model_name="intfloat/multilingual-e5-small")
 
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
@@ -29,7 +29,9 @@ def read_root():
 @app.post("/search")
 def search(request: SearchRequest):
     try:
-        query_embedding = model.encode(request.question).tolist()
+        # FastEmbed возвращает генератор, берем первый элемент и делаем список
+        query_embedding = list(model.embed([request.question]))[0].tolist()
+        
         response = supabase.rpc(
             'match_documents',
             {
@@ -49,13 +51,18 @@ def upload(request: UploadRequest):
         chunks = [request.content[i:i+500] for i in range(0, len(request.content), 500)]
         chunks = [c for c in chunks if c.strip()]
         
+        if not chunks:
+            return {"status": "success", "chunks_added": 0}
+
+        # Делаем вектора разом
+        embeddings = list(model.embed(chunks))
+        
         data_to_insert = []
-        for chunk in chunks:
-            embedding = model.encode(chunk).tolist()
+        for i, chunk in enumerate(chunks):
             data_to_insert.append({
                 "document_name": request.document_name,
                 "content": chunk,
-                "embedding": embedding
+                "embedding": embeddings[i].tolist()
             })
             
         supabase.table("document_chunks").insert(data_to_insert).execute()
